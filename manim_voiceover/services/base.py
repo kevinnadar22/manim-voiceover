@@ -53,7 +53,7 @@ class SpeechService(ABC):
         self,
         global_speed: float = 1.00,
         cache_dir: t.Optional[str] = None,
-        transcription_model: t.Optional[str] = None,
+        transcription_model: t.Optional[str] = "whisper-large-v3-turbo",
         transcription_kwargs: dict = {},
         **kwargs,
     ):
@@ -64,7 +64,7 @@ class SpeechService(ABC):
             cache_dir (str, optional): The directory to save the audio
                 files to. Defaults to ``voiceovers/``.
             transcription_model (str, optional): The
-                `OpenAI Whisper model <https://github.com/openai/whisper#available-models-and-languages>`_
+                `Groq Whisper model <https://console.groq.com/docs/speech-to-text#supported-models>`_
                 to use for transcription. Defaults to None.
             transcription_kwargs (dict, optional): Keyword arguments to
                 pass to the transcribe() function. Defaults to {}.
@@ -79,7 +79,8 @@ class SpeechService(ABC):
         if not os.path.exists(self.cache_dir):
             os.makedirs(self.cache_dir)
 
-        self.transcription_model = None
+        self.transcription_model = transcription_model
+        self.transcription_kwargs = transcription_kwargs
         # self._whisper_model = None
         # self.set_transcription(model=transcription_model, kwargs=transcription_kwargs)
 
@@ -135,40 +136,12 @@ class SpeechService(ABC):
     def groq_transcribe(self, audio_path: str):
         with open(audio_path, "rb") as audio:
             transcript = groq_client.audio.transcriptions.create(
-                model="whisper-large-v3-turbo",
+                model=self.transcription_model,
                 response_format="verbose_json",
                 file=(audio_path, audio.read()),
                 timestamp_granularities=["word"],
             )
         return transcript
-
-    def set_transcription(self, model: str = None, kwargs: dict = {}):
-        """Set the transcription model and keyword arguments to be passed
-        to the transcribe() function.
-
-        Args:
-            model (str, optional): The Whisper model to use for transcription. Defaults to None.
-            kwargs (dict, optional): Keyword arguments to pass to the transcribe() function. Defaults to {}.
-        """
-        if model != self.transcription_model:
-            if model is not None:
-                try:
-                    import whisper as __tmp
-                    import stable_whisper as whisper
-                except ImportError:
-                    logger.error(
-                        'Missing packages. Run `pip install "manim-voiceover[transcribe]"` to be able to transcribe voiceovers.'
-                    )
-
-                prompt_ask_missing_extras(
-                    ["whisper", "stable_whisper"],
-                    "transcribe",
-                    "SpeechService.set_transcription()",
-                )
-                self._whisper_model = whisper.load_model(model)
-            else:
-                self._whisper_model = None
-        self.transcription_kwargs = kwargs
 
     def get_audio_basename(self, data: dict) -> str:
         dumped_data = json.dumps(data)
