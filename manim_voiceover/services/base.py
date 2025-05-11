@@ -18,28 +18,30 @@ from manim_voiceover.helper import (
 )
 from manim_voiceover.modify_audio import adjust_speed
 from manim_voiceover.tracker import AUDIO_OFFSET_RESOLUTION
+from groq import Client
 
+groq_client = Client(api_key=os.getenv("GROQ_API_KEY"))
 
 def timestamps_to_word_boundaries(segments):
     word_boundaries = []
     current_text_offset = 0
-    for segment in segments:
-        for dict_ in segment["words"]:
-            word = dict_["word"]
-            word_boundaries.append(
-                {
-                    "audio_offset": int(dict_["start"] * AUDIO_OFFSET_RESOLUTION),
-                    # "duration_milliseconds": 0,
-                    "text_offset": current_text_offset,
-                    "word_length": len(word),
-                    "text": word,
-                    "boundary_type": "Word",
-                }
-            )
-            current_text_offset += len(word)
-            # If word is not punctuation, add a space
-            # if word not in [".", ",", "!", "?", ";", ":", "(", ")"]:
-            # current_text_offset += 1
+
+    for dict_ in segments["words"]:
+        word = dict_["word"]
+        word_boundaries.append(
+            {
+                "audio_offset": int(dict_["start"] * AUDIO_OFFSET_RESOLUTION),
+                # "duration_milliseconds": 0,
+                "text_offset": current_text_offset,
+                "word_length": len(word),
+                "text": word,
+                "boundary_type": "Word",
+            }
+        )
+        current_text_offset += len(word)
+        # If word is not punctuation, add a space
+        # if word not in [".", ",", "!", "?", ";", ":", "(", ")"]:
+        # current_text_offset += 1
 
     return word_boundaries
 
@@ -78,8 +80,8 @@ class SpeechService(ABC):
             os.makedirs(self.cache_dir)
 
         self.transcription_model = None
-        self._whisper_model = None
-        self.set_transcription(model=transcription_model, kwargs=transcription_kwargs)
+        # self._whisper_model = None
+        # self.set_transcription(model=transcription_model, kwargs=transcription_kwargs)
 
         self.additional_kwargs = kwargs
 
@@ -91,13 +93,15 @@ class SpeechService(ABC):
         original_audio = dict_["original_audio"]
 
         # Check whether word boundaries exist and if not run stt
-        if "word_boundaries" not in dict_ and self._whisper_model is not None:
-            transcription_result = self._whisper_model.transcribe(
-                str(Path(self.cache_dir) / original_audio), **self.transcription_kwargs
-            )
+        # if "word_boundaries" not in dict_ and self._whisper_model is not None:
+        if "word_boundaries" not in dict_ and os.getenv("GROQ_API_KEY") is not None:
+            # transcription_result = self._whisper_model.transcribe(
+            #     str(Path(self.cache_dir) / original_audio), **self.transcription_kwargs
+            # )
+            transcription_result = self.groq_transcribe(str(Path(self.cache_dir) / original_audio))
             logger.info("Transcription: " + transcription_result.text)
             word_boundaries = timestamps_to_word_boundaries(
-                transcription_result.segments_to_dicts()
+                transcription_result.to_dict()
             )
             dict_["word_boundaries"] = word_boundaries
             dict_["transcribed_text"] = transcription_result.text
@@ -127,6 +131,16 @@ class SpeechService(ABC):
             Path(self.cache_dir) / DEFAULT_VOICEOVER_CACHE_JSON_FILENAME, dict_
         )
         return dict_
+    
+    def groq_transcribe(self, audio_path: str):
+        with open(audio_path, "rb") as audio:
+            transcript = groq_client.audio.transcriptions.create(
+                model="whisper-large-v3-turbo",
+                response_format="verbose_json",
+                file=(audio_path, audio.read()),
+                timestamp_granularities=["word"],
+            )
+        return transcript
 
     def set_transcription(self, model: str = None, kwargs: dict = {}):
         """Set the transcription model and keyword arguments to be passed
@@ -154,7 +168,6 @@ class SpeechService(ABC):
                 self._whisper_model = whisper.load_model(model)
             else:
                 self._whisper_model = None
-
         self.transcription_kwargs = kwargs
 
     def get_audio_basename(self, data: dict) -> str:
